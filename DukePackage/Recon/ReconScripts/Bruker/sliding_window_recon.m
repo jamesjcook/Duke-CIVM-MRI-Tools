@@ -1,4 +1,4 @@
-function sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out)
+function sliding_window_recon_bak(data_buffer,opt_struct,data_in,data_work,data_out)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
 % A demonstration of basic Dynamic Contrast Enhanced (DCE) reconstruction
@@ -17,6 +17,15 @@ function sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out)
 % run([code_path '/GE-MRI-Tools/setup.m']);
 % run([code_path '/Non-Cartesian-Reconstruction/setup.m'])
 % u_dir='/Users/james/';
+if ~exist('data_buffer','var')
+    error('MUST HAVE A DATABUFFER TO CATCH OUTPUT');
+end
+if ~exist('opt_struct','var')
+    error('must have options for manual mode, specify at least options.dataFile')
+end
+if ~isfield(opt_struct,'radial_mode')
+    opt_struct.radial_mode='good';
+end
 
 if strcmp(opt_struct.radial_mode,'fast')
     %% Fast (for quick quality control) Reconstruction parameters
@@ -46,11 +55,18 @@ end
 
 %% Read the header file to get scan info
 nKeys = 13;% a fully sampled acq has this many keys. Constant for now.
+if ~exist ('data_in','var')
+    nPts=64;
+    nCoils=4;
+    nRaysPerKey=1980;
+    nAcq=11;
+else
 % This could be done nicer by reading the header, etc. - I was lazy and hard-coded
 nPts = data_in.ray_length;%64;
 nCoils = data_in.ds.Sub('c');%2;%4;
 nRaysPerKey = data_in.rays_per_block;%1980;
 nAcq = data_in.ray_blocks/nKeys;%4;%11;
+end
 % % samplesPerAcq = nPts*nRaysPerKey*nKeys;
 unscaled_size = 2*nPts*[1 1 1];
 scaled_output_size = round(scale*unscaled_size);
@@ -77,13 +93,23 @@ while expected_dims(end)==1
     expected_dims(end)=[];
 end
 if ~isprop(data_buffer,'radial')
-    data = reshape(data_buffer.data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
-    if numel(data) ~= prod(expected_dims) ...
-            || sum(size(data) ~= expected_dims)>0
-        db_inplace('scott_grid','data didnt shape up');
+    if ~isprop(data_buffer,'data')
+        fid = fopen(opt_struct.dataFile);
+        data = fread(fid,inf,'int32');
+        fclose(fid);
+        data = complex(data(1:2:end),data(2:2:end)); % Make the data actually complex
+        data = reshape(data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
+        data = permute(data,[1 3 4 5 2]);% Make coil last dimmension
+        data = reshape(data,[nPts nRaysPerKey*nKeys nAcq nCoils]); % Vectorize all but coil dimmension
+    else
+        data = reshape(data_buffer.data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
+        if numel(data) ~= prod(expected_dims) ...
+                || sum(size(data) ~= expected_dims)>0
+            db_inplace('scott_grid','data didnt shape up');
+        end
+        data = permute(data,[1 3 4 5 2]);% Make coil last dimmension
+        data = reshape(data,[nPts nRaysPerKey*nKeys nAcq nCoils]); % Vectorize all but coil dimmension
     end
-    data = permute(data,[1 3 4 5 2]);% Make coil last dimmension
-    data = reshape(data,[nPts nRaysPerKey*nKeys nAcq nCoils]); % Vectorize all but coil dimmension
     data_buffer.addprop('radial');
     data_buffer.radial=data;
 else
@@ -98,11 +124,23 @@ end
 % traj = reshape(traj,[3 nPts nRaysPerKey nKeys]); % put trajectory into matrix form
 expected_dims=[3 nPts nRaysPerKey nKeys];
 if ~isprop(data_buffer,'straj')
-    if numel(size(data_buffer.trajectory)) ~= numel(expected_dims) ...
-            || sum(size(data_buffer.trajectory) ~= expected_dims)>0
-        db_inplace('scott_grid','traj didnt shape up');
+    if ~isprop(data_buffer,'trajectory')
+        trajectory_name='traj';
+        base_path=fileparts(opt_struct.dataFile);
+        trajFile=[base_path '/' trajectory_name ];
+        fid = fopen(trajFile);
+        traj = fread(fid,inf,'double');
+        fclose(fid);
+        traj = reshape(traj,[3 nPts nRaysPerKey nKeys]); % put trajectory into matrix form
+        traj = permute(traj,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
+        traj = reshape(traj,[nPts nRaysPerKey*nKeys 3])/scale; % vectorize keys and Acq
+    else
+        if numel(size(data_buffer.trajectory)) ~= numel(expected_dims) ...
+                || sum(size(data_buffer.trajectory) ~= expected_dims)>0
+            db_inplace('scott_grid','traj didnt shape up');
+        end
+        traj = permute(data_buffer.trajectory,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
     end
-    traj = permute(data_buffer.trajectory,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
     traj = reshape(traj,[nPts nRaysPerKey*nKeys 3])/scale; % vectorize keys and Acq
     data_buffer.addprop('straj');
     data_buffer.straj=traj;
@@ -115,11 +153,16 @@ aliased_Pts = any(any(abs(traj)>=0.5,3),2);
 nPts = sum(~aliased_Pts);
 traj = traj(1:nPts,:,:);
 data = data(1:nPts,:,:,:);
-keysPerWindow = nPts*nRaysPerKey*nKeys; % 13 keys of data
-windowStep = nPts*nRaysPerKey*1; % Step by one key of data
+ptsPerWindow = nPts*nRaysPerKey*nKeys; % 13 keys of data
 samplesPerAcq = nPts*nRaysPerKey*nKeys;
+if isfield(opt_struct,'window_width')
+    ptsPerWindow = nPts*nRaysPerKey*opt_struct.window_width; % 13 keys of data
+    samplesPerAcq = nPts*nRaysPerKey*opt_struct.window_width;
+end
+    
+windowStep = nPts*nRaysPerKey*1; % Step by one key of data
 
-% Vectorize data and traj
+% % Vectorize data and traj
 traj = reshape(traj,[nPts*nRaysPerKey*nKeys 3]); % vectorize all but [kx,ky,kz] dimmension
 data = reshape(data,[nPts*nRaysPerKey*nKeys*nAcq nCoils]); % Vectorize all but coil dimmension
 
@@ -146,21 +189,22 @@ end
 
 %% Perform sliding window Reconstruction
 ptsPerCoil = nPts*nRaysPerKey*nKeys*nAcq; % all keys, acqs
-windowStartIdxs = 1:windowStep:(ptsPerCoil-keysPerWindow+1);
+windowStartIdxs = 1:windowStep:(ptsPerCoil-ptsPerWindow+1);
 nWindows = length(windowStartIdxs);
 slidingWindowReconVol = zeros([reconMatSize nWindows]);
 
 % Batch reconstructions of the same trajectories to save on DCF
 % calculations and the computation of system matrices
 startMod = mod(windowStartIdxs-1,samplesPerAcq)+1;
-[uniqueStarts,ia,ic] = unique(startMod); % find all unique trajectories
+% [uniqueStarts,ia,ic] = unique(startMod); % find all unique trajectories
+[uniqueStarts,~,ic] = unique(startMod); % find all unique trajectories
 
 % and yet he nevr uses either edges or counts.
-try % new code 2014b and newer
-    [uniqueCounts, uniqueEdges] = histcounts(ic,length(uniqueStarts));
-catch me % old codeb pre.
-    [uniqueCounts, uniqueEdges] = histc(ic,length(uniqueStarts));
-end
+% try % new code 2014b and newer
+%     [uniqueCounts, uniqueEdges] = histcounts(ic,length(uniqueStarts));
+% catch me % old codeb pre.
+%     [uniqueCounts, uniqueEdges] = histc(ic,length(uniqueStarts));
+% end
 
 
 nSysMat = length(uniqueStarts);
@@ -169,7 +213,7 @@ tmpVol = zeros(reconMatSize);
 disp(['Completed 0/' num2str(nSysMat) ' traj subsets']);
 for iSysMat = 1:nSysMat % This can be done in parallel, but takes LOTS of memory
     % Make a reconObj for each window
-    windowTraj = squeeze(traj(mod(uniqueStarts(iSysMat)+[0:(keysPerWindow-1)]-1,samplesPerAcq)+1,:));
+    windowTraj = squeeze(traj(mod(uniqueStarts(iSysMat)+[0:(ptsPerWindow-1)]-1,samplesPerAcq)+1,:));
     
     % Construct system model
     disp('   Creating System model');
@@ -196,7 +240,7 @@ for iSysMat = 1:nSysMat % This can be done in parallel, but takes LOTS of memory
     disp(['   Reconstructed 0/' num2str(nSameStart) ' of repeated traj']);
     for iSameStart = 1:nSameStart % this can be done in parallel, but wont help as much as making the first loop parallel
         iWindow = sameStartIdx(iSameStart);
-        sampleIdx = windowStartIdxs(iWindow) + [0:(keysPerWindow-1)];
+        sampleIdx = windowStartIdxs(iWindow) + [0:(ptsPerWindow-1)];
         
         % Recon each coil in a SOS sense (parallel recon like SENSE/GRAPPA etc
         % would be smarter)
@@ -228,6 +272,9 @@ end
 clear data traj windowStartIdxs kernelObj proxObj; % clean up
 reconTime = toc/60;
 fprintf('reconstruct in %f minutes\n',reconTime);
+if ~isprop(data_buffer,'data')
+    data_buffer.addprop('data');
+end
 data_buffer.data=slidingWindowReconVol;
 % Show the reconstruction
 % imslice(slidingWindowReconVol,'Sliding window');
