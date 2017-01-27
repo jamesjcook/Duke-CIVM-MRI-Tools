@@ -71,6 +71,9 @@ if ~exist ('data_in','var')
 else
     % This could be done nicer by reading the header, etc. - I was lazy and hard-coded
     nPts = data_in.ray_length;%64;
+    if isfield(data_in,'ramp_points')
+        nPts=nPts+data_in.ramp_points;
+    end
     nCoils = data_in.ds.Sub('c');%2;%4;
     nRaysPerKey = data_in.rays_per_block;%1980;
     nAcq = data_in.ray_blocks/nKeys;%4;%11;
@@ -218,8 +221,13 @@ for iWin = 1:nWindows
     dcf = 1./tmpData;
     for iDcfIter=1:nPipeIter
 %         disp(['      DCF iter ' num2str(iDcfIter) '/' num2str(nPipeIter)])
+
         A.grid(dcf,tmpVol);
         A.ungrid(tmpVol,tmpData);
+        fig_id=disp_vol_center(tmpVol,1,100+iDcfIter);
+        if fig_id>0
+            set(fig_id,'Name',sprintf('kspace_dcf_i%i',iDcfIter));
+        end
         dcf = dcf./tmpData;
     end
     
@@ -237,7 +245,10 @@ for iWin = 1:nWindows
         
         % Reconstruct image domain with IFFT
         tmpComplexVol = ifftshift(ifftn(tmpComplexVol));
-        
+        fig_id=disp_vol_center(tmpComplexVol,0,200+iCoil);
+        if fig_id>0
+            set(fig_id,'Name',sprintf('tmpComplex_c%i',iCoil));
+        end
         % Accumulate SOS
         sosComplexVol = sosComplexVol + tmpComplexVol.^2;
 %         disp(['      Finished Coil ' num2str(iCoil) '/' num2str(nCoils)]);
@@ -245,16 +256,30 @@ for iWin = 1:nWindows
     
     % Finish SOS
     sosComplexVol = sqrt(sosComplexVol);
-    
+    fig_id=disp_vol_center(sosComplexVol,0,310);
+    if fig_id>0
+        set(fig_id,'Name',sprintf('sosComplex'));
+    end
     % Compute deapodization volume for this traj
     if(deapodize)
 %         disp('   Deapodizing...');
         tmpData = ~any(windowTraj,1).*dcf;
         A.grid(tmpData,tmpVol);
         tmpVol = ifftshift(ifftn(tmpVol));
-        sosComplexVol = sosComplexVol./tmpVol;
+        fig_id=disp_vol_center(tmpVol,0,311);
+        if fig_id>0
+            set(fig_id,'Name',sprintf('deapodize_filter'));
+        end
+        if sum(nonzeros(tmpVol(:)))==0
+            warning('Deapoidze failure, cannot deapodize');
+        else
+            sosComplexVol = sosComplexVol./tmpVol;
+        end
     end
-    
+    fig_id=disp_vol_center(sosComplexVol,0,312);
+    if fig_id>0
+        set(fig_id,'Name',sprintf('Complete_image_post_deapodize'));
+    end
     % Crop volume
     if(cropVolume)
 %         disp('   Cropping volume...');
