@@ -80,6 +80,11 @@ else
 end
 samplesPerAcq = nPts*nRaysPerKey*nKeys;
 mat_size = 2*nPts*[1 1 1];
+if isfield(data_in,'ramp_points')
+    %nPts=nPts
+    mat_size = 2*(nPts-data_in.ramp_points)*[1 1 1];
+end
+
 overgrid_mat_size = ceil(mat_size.*overgridding);
 overgridding = overgrid_mat_size./mat_size;
 
