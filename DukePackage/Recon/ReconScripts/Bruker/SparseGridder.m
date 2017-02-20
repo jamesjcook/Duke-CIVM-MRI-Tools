@@ -26,14 +26,14 @@ classdef SparseGridder
             % scale trajectories into overgridded pixel units
             nDims = length(output_matrix_size);
             for iDim = 1:nDims
-                traj(iDim,:) = (traj(iDim,:)+0.5)*obj.overgridSize(iDim);
+                traj(iDim,:) = (traj(iDim,:)+0.5)*obj.overgridSize(iDim);%mem rise 30->31
                 kern_sig(iDim) = kern_sig(iDim)*obj.overgridding(iDim);
                 kern_ext(iDim) = kern_ext(iDim)*obj.overgridding(iDim);
                 
                 % Check that no trajectory exceeds bounds
                 invalidTraj = (traj(iDim,:) > obj.overgridSize(iDim)) | (traj(iDim,:)<1);
                 if(any(invalidTraj))
-                    error(['ERROR: trajectory must be within matrix bounds!']);
+                    error('ERROR: trajectory must be within matrix bounds!');
                 end
             end
             
@@ -44,8 +44,8 @@ classdef SparseGridder
             
             % Requires that traj be in pixel units not -0.5:0.5!
             obj.Atrans = mex_thread_calcSparseGridMatrix(double(traj), obj.overgridSize,...
-                double(kern_sig), double(kern_ext), obj.nThreads);
-            obj.A = obj.Atrans';
+                double(kern_sig), double(kern_ext), obj.nThreads); % mem rise from 31->79->50  OR 7->51->24
+            obj.A = obj.Atrans';% mem rise 50->73 OR 24->47
         end
         
         
@@ -54,7 +54,7 @@ classdef SparseGridder
             % calculations
             obj = varargin{1};
             nonCart = varargin{2};
-            if((nargin == 3) & (nargout == 0))
+            if((nargin == 3) && (nargout == 0))
                 % Use in-place
                 cart = double(varargin{3});
             else
@@ -79,7 +79,7 @@ classdef SparseGridder
             % calculations
             obj = varargin{1};
             cart = varargin{2};
-            if((nargin == 3) & (nargout == 0))
+            if((nargin == 3) && (nargout == 0))
                 % Use in-place
                 nonCart = double(varargin{3});
             else
