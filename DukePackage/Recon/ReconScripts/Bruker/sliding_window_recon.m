@@ -18,7 +18,12 @@ function sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out)
 % run([code_path '/Non-Cartesian-Reconstruction/setup.m'])
 % u_dir='/Users/james/';
 if ~exist('data_buffer','var')
-    error('MUST HAVE A DATABUFFER TO CATCH OUTPUT');
+    if ~exist('sliding_window_bigtest.mat','file')
+        error('MUST HAVE A DATABUFFER TO CATCH OUTPUT');
+    else
+        warning('Loading test data!'); pause(2);
+        load('sliding_window_bigtest.mat');sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out);return;
+    end
 end
 if ~exist('opt_struct','var')
     error('must have options for manual mode, specify at least options.dataFile')
@@ -114,6 +119,7 @@ if ~isprop(data_buffer,'radial')
         data = reshape(data,[nPts nRaysPerKey*nKeys nAcq nCoils]); % Vectorize all but coil dimmension
     else
         data = reshape(data_buffer.data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
+        data_buffer.data=[];
         if numel(data) ~= prod(expected_dims) ...
                 || sum(size(data) ~= expected_dims)>0
             db_inplace('scott_grid','data didnt shape up');
@@ -151,6 +157,7 @@ if ~isprop(data_buffer,'straj')
             db_inplace('sliding_window_recon','traj didnt shape up');
         end
         traj = permute(data_buffer.trajectory,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
+        data_buffer.trajectory=[];
     end
     traj = reshape(traj,[nPts nRaysPerKey*nKeys 3]); % vectorize keys and Acq
     data_buffer.addprop('straj');
@@ -170,41 +177,41 @@ totalSamples = samplesPerAcq*nAcq; % all keys, acqs
 windowStartIdxs = 1:timePointStep_sampleUnits:(totalSamples-keysPerTimePoint+1);
 nWindows = length(windowStartIdxs);
 
-% tmpVol = zeros(overgrid_mat_size);
-% tmpData = zeros([1 keysPerTimePoint]);
-% tmpComplexVol = complex(zeros(overgrid_mat_size));
-% tmpComplexData = complex(zeros([1 keysPerTimePoint]));
-% sosComplexVol = complex(zeros(overgrid_mat_size));
-% dcf = complex(zeros([1 keysPerTimePoint]));
-% if(cropVolume)
-%     cropSosVol = complex(zeros(mat_size));
-% end
 
 if(saveFullVol)
     warning('About to make a really big matrix!');
     if(cropVolume)
-        fullVolume = complex(zeros([mat_size nWindows]));
+        tmpVol=zeros([mat_size nWindows],'single');
     else
-        fullVolume = complex(zeros([overgrid_mat_size nWindows]));
+        tmpVol=zeros([overgrid_mat_size nWindows],'single');
     end
+    fullVolume = complex(tmpVol,tmpVol);
 end
 
 start_time=tic;
+%% preallocate all arrays in memory, so we can have constant mem useage.
+tmpVol = zeros(overgrid_mat_size);% consider magBlank as we'll use this later
+%tmpComplexVol = complex(zeros(overgrid_mat_size));% oddly slow
+tmpComplexVol = complex(tmpVol,tmpVol);
+%sosComplexVol = complex(zeros(overgrid_mat_size)); % oddly slow
+sosComplexVol = complex(tmpVol,tmpVol);
+tmpData = zeros([1 keysPerTimePoint]);
+%tmpComplexData = complex(zeros([1 keysPerTimePoint]));% oddly slow
+tmpComplexData = complex(tmpData,tmpData);
+%dcf = complex(zeros([1 keysPerTimePoint]));
+dcf = complex(tmpData,tmpData);
+
 % startingTime = toc;
 % parfor iWin = 1:nWindows
+fprintf('begin grid operations by window\n');
 for iWin = 1:nWindows
 %     disp(['Reconstructing ' num2str(iWin) '/' num2str(nWindows) ' traj subsets']);
-    tmpVol = zeros(overgrid_mat_size);
-    tmpData = zeros([1 keysPerTimePoint]);
-    tmpComplexVol = complex(zeros(overgrid_mat_size));
-    tmpComplexData = complex(zeros([1 keysPerTimePoint]));
-    sosComplexVol = complex(zeros(overgrid_mat_size));
-    dcf = complex(zeros([1 keysPerTimePoint]));
     if(cropVolume)
-        cropSosVol = complex(zeros(mat_size));
+        tv=zeros(mat_size);
+        cropSosVol = complex(tv,tv);clear tv;
     end
     
-    % Make a trajectory for each window
+    %% Make a trajectory for each window
     windowKeys = windowStartIdxs(iWin)+[1:keysPerTimePoint]-1;
     if(nAcq > 1)
         windowKeysTraj = mod(windowStartIdxs(iWin)+[1:keysPerTimePoint]-1,samplesPerAcq);
@@ -214,21 +221,26 @@ for iWin = 1:nWindows
         windowTraj = squeeze(traj(:,windowKeys));
     end
     
-    % Construct system model for this trajectory
-
-    A = SparseGridder(windowTraj,mat_size,sharpness,extent,overgridding,opt_struct.nThreads);
+    %% Construct system model for this trajectory This is a BIG OPERATION.
+    % It may have room for optimization under the hood.
+    % Also trashes previous copies, so no point in keeping an old one in
+    % memory. 
+    clear SG;
+    fprintf('Creating SparseGrid window %i, massive memory expansion now.\n',iWin);
+    SG = SparseGridder(windowTraj,mat_size,sharpness,extent,overgridding,opt_struct.nThreads);% mem rise 34->77->75
        
        
     % Option 1 - dcf
-%     disp('   Computing density compensation weights');
-    tmpVol = ones(A.overgridSize);
-    tmpData = A.ungrid(tmpVol);
-    dcf = 1./tmpData;
+    %% Computing density compensation weights
+    fprintf('Computing density compenation\n');
+    clear tmpVol;
+    tmpVol = ones(SG.overgridSize);% mem rise 73->76->71
+    tmpData = SG.ungrid(tmpVol);
+    dcf = 1./tmpData;% mem rise 71->72
     for iDcfIter=1:nPipeIter
 %         disp(['      DCF iter ' num2str(iDcfIter) '/' num2str(nPipeIter)])
-
-        A.grid(dcf,tmpVol);
-        A.ungrid(tmpVol,tmpData);
+        SG.grid(dcf,tmpVol);
+        SG.ungrid(tmpVol,tmpData);
         fig_id=disp_vol_center(tmpVol,1,100+iDcfIter);
         if fig_id>0
             set(fig_id,'Name',sprintf('kspace_dcf_i%i',iDcfIter));
@@ -236,41 +248,45 @@ for iWin = 1:nWindows
         dcf = dcf./tmpData;
     end
     
+    %% Grid data from all coils and compute SOS,
+    % Must set data to 0 as we accumulate it into sos. This can cause a
+    % memory surge depending on how its done.
+    % Both of these cause a surge.
+    %sosComplexVol = complex(zeros(overgrid_mat_size)); % reset to zero
+    %sosComplexVol = complex(zeros(overgrid_mat_size),zeros(overgrid_mat_size)); % reset to zero
+    clear tmpVol tmpComplexVol sosComplexVol;
+    tmpVol=zeros(SG.overgridSize,'single');sosComplexVol=complex(tmpVol,tmpVol);tmpVol=double(tmpVol);tmpComplexVol=complex(tmpVol,tmpVol);
+    %%% these two may be more memory efficient.
+    % clear sosComplexVol;sosComplexVol=zeros(overgrid_mat_size);sosComplexVol=complex(sosComplexVol,sosComplexVol);
+    % sosComplexVol = sosComplexVol.*(0+0i); % mem rise 74->85, interestingly this just delays when memory is used, and slows down later operations.
+    
     % Create a data matrix of all repetitions of this trajectory
     windowData = double(data(:,windowKeys));
-    
-    % Grid data from all coils and compute SOS
-    sosComplexVol = complex(zeros(overgrid_mat_size)); % reset to zero
     for iCoil = 1:nCoils
         % Apply dcf
         windowData(iCoil,:)  = windowData(iCoil,:).*dcf;
-        
         % Calculate gridded kspace
-        A.grid(windowData(iCoil,:),tmpComplexVol);
-        
+        SG.grid(windowData(iCoil,:),tmpComplexVol);
         % Reconstruct image domain with IFFT
-        tmpComplexVol = ifftshift(ifftn(tmpComplexVol));
-        fig_id=disp_vol_center(tmpComplexVol,0,200+iCoil);
-        if fig_id>0
-            set(fig_id,'Name',sprintf('tmpComplex_c%i',iCoil));
-        end
+        % tmpComplexVol = ifftn(tmpComplexVol);
+        tmpComplexVol = (ifft(ifft(ifft(tmpComplexVol,[],1),[],2),[],3)); % In testing this way is ever so slightly faster.
         % Accumulate SOS
-        sosComplexVol = sosComplexVol + tmpComplexVol.^2;
-%         disp(['      Finished Coil ' num2str(iCoil) '/' num2str(nCoils)]);
+        sosComplexVol = sosComplexVol + tmpComplexVol.^2;% mem rise 79->90->85
     end
-    
     % Finish SOS
     sosComplexVol = sqrt(sosComplexVol);
+    sosComplexVol = ifftshift(sosComplexVol);
     fig_id=disp_vol_center(sosComplexVol,0,310);
     if fig_id>0
         set(fig_id,'Name',sprintf('sosComplex'));
     end
-    % Compute deapodization volume for this traj
+    % clear tmpComplexVol windowData;
+    %% Compute deapodization volume for this traj
     if(deapodize)
 %         disp('   Deapodizing...');
         tmpData = ~any(windowTraj,1).*dcf;
-        A.grid(tmpData,tmpVol);
-        tmpVol = ifftshift(ifftn(tmpVol));
+        SG.grid(tmpData,tmpVol);
+        tmpVol = ifftshift(ifftn(tmpVol));% mem rise 85->96->85
         fig_id=disp_vol_center(tmpVol,0,311);
         if fig_id>0
             set(fig_id,'Name',sprintf('deapodize_filter'));
@@ -281,6 +297,7 @@ for iWin = 1:nWindows
             sosComplexVol = sosComplexVol./tmpVol;
         end
     end
+    % clear tmpData;
     fig_id=disp_vol_center(sosComplexVol,0,312);
     if fig_id>0
         set(fig_id,'Name',sprintf('Complete_image_post_deapodize'));
@@ -289,8 +306,8 @@ for iWin = 1:nWindows
     if(cropVolume)
 %         disp('   Cropping volume...');
         cropSosVol = subvolume(sosComplexVol,...
-            [round([0.5*(A.overgridSize-A.gridSize)+1]); ...
-            round([0.5*(A.overgridSize+A.gridSize)])]);
+            [round([0.5*(SG.overgridSize-SG.gridSize)+1]); ...
+            round([0.5*(SG.overgridSize+SG.gridSize)])]);
     end
     
 %     % Save/store this time point
@@ -310,7 +327,7 @@ for iWin = 1:nWindows
         end
 %     end
     
-    disp('Completed another window')
+    fprintf('Window %i completed.\n',iWin);
 %     % Compute remaining time
 %     currentTime = toc;
 %     timeSoFar = currentTime - startingTime;
