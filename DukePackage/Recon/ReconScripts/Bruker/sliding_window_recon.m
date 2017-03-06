@@ -10,8 +10,7 @@ function sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out)
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Relies on civm_matlab_common_utils 
-% retrievalable via git clone
-% https://git@github.com/jamesjcook/civm_matlab_comon_utils
+% retrievalable via "git clone https://git@github.com/jamesjcook/civm_matlab_comon_utils"
  
 save_location='/Volumes/CivmUsers/omega/';
 if ~exist(save_location,'dir')
@@ -35,7 +34,8 @@ if ~exist('data_buffer','var')
         else
             load('sliding_window_bigtest.mat');
         end
-        sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out);return;
+        sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out);
+        return;
     end
 end
 if ~exist(fullfile(p,'sliding_window_bigtest.mat'),'file')
@@ -78,38 +78,47 @@ end
 %% VARIABLE OVERRRIDES
 saveFullVol = 0;
 
-    
-    %% Find directory containing all information
-% % reconDir = [u_dir '/Desktop/B03180/'];
-
 %% Read the header file to get scan info
-nKeys = 13;% a fully sampled acq has this many keys. Constant for now.
+% nCoils      = coil count in acquision
+% nPts        = ray_lengh+ramp_points
+% nRaysPerKey = rays per step of trajectory
+% nKeys       = number of steps in full trajectory
+% nAcq        = repetitions of trajectory
+nKeys = 13;% in ergys terminology a fully sampled acq has this many steps.
 if isfield(data_buffer.headfile,'B_vol_type') ... 
         && isempty(regexpi(data_buffer.headfile.B_vol_type,'.*keyhole.*'))
     nKeys=1;
 end
+% To keep this code as it was, for new acquisitions this must be the number
+% of steps of the trajectory.
+% In john's super acquisition 16 would work, but that produces many volumes(57*16).
+% Recommended 2, 
+%{
+nKeys=2; % using  factor(51360) found the factors ( 2 2 2 2 2 3 5 107 )
+nRaysPerKey=107*3*5*2*2*2*2;
+nAcq=57;
+%}
+
 if ~exist ('data_in','var')
     nPts=64;
     nCoils=4;
     nRaysPerKey=1980;
     nAcq=11;
 else
-    % This could be done nicer by reading the header, etc. - I was lazy and hard-coded
+    % This somewhat nicely reads the header. 
+    % For expanding the sliding window code this needs to be expanded/overridden.
     nPts = data_in.ray_length;%64;
     if isfield(data_in,'ramp_points')
-        nPts=nPts+data_in.ramp_points;
+        nPts=nPts+data_in.ramp_points;%64+ramp points;
     end
-    nCoils = data_in.ds.Sub('c');%2;%4;
-    nRaysPerKey = data_in.rays_per_block;%1980;
-    nAcq = data_in.ray_blocks/nKeys;%4;%11;
+    nCoils = data_in.ds.Sub('c');%2;%4;          % coil count in acquision
+    nRaysPerKey = data_in.rays_per_block;%1980;  % stepsize of trajectory
+    nAcq = data_in.ray_blocks/nKeys;%4;%11;      % total number of output volumes AND steps in the data.
 end
-% nPts=ray_lengh
-% nRaysPerKey = as stated
-% nKeys is number of divisions of the trajectory
+
 samplesPerAcq = nPts*nRaysPerKey*nKeys;
 mat_size = 2*nPts*[1 1 1];
 if isfield(data_in,'ramp_points')
-    %nPts=nPts
     mat_size = 2*(nPts-data_in.ramp_points)*[1 1 1];
 end
 
@@ -120,13 +129,7 @@ overgridding = overgrid_mat_size./mat_size;
 keysPerTimePoint = nRaysPerKey*nKeys*nPts; % 
 timePointStep_sampleUnits = round(keysPerTimePoint/nKeys); % percent of keysPerTimePoint
 
-%% Read in fid data, put in
-% dataFile = [ u_dir  '/Desktop/B03180/fid'];
-% fid = fopen(dataFile);
-% data = fread(fid,inf,'int32');
-% fclose(fid);
-% data = complex(data(1:2:end),data(2:2:end)); % Make the data complex
-% from interleaved complex
+%% Read/reshape fid data, 
 expected_dims=[nPts nCoils nRaysPerKey nKeys nAcq];
 while expected_dims(end)==1
     expected_dims(end)=[];
@@ -156,12 +159,7 @@ else
     data=data_buffer.radial;
 end
 
-%% Read in trajectory
-% trajFile = [ u_dir  '/Desktop/B03180/traj'];
-% fid = fopen(trajFile);
-% traj = fread(fid,inf,'double');
-% fclose(fid);
-% traj = reshape(traj,[3 nPts nRaysPerKey nKeys]); % put trajectory into matrix form
+%% Read/reshape in trajectory
 expected_dims=[3 nPts nRaysPerKey nKeys];
 if ~isprop(data_buffer,'straj')
     if ~isprop(data_buffer,'trajectory')
@@ -189,17 +187,15 @@ else
     traj=data_buffer.straj;
 end
 
-% % Vectorize data and traj
+%% Vectorize data and traj
 % traj is rl*rpk*k*3
 traj = reshape(traj,[samplesPerAcq 3])'; % vectorize all but [kx,ky,kz] dimmension
 data = reshape(data,[samplesPerAcq*nAcq nCoils])'; % Vectorize all but coil dimmension
 
 %% Perform sliding window Reconstruction
 totalSamples = samplesPerAcq*nAcq; % all keys, acqs
-% windowStartIdxs = 1:timePointStep_sampleUnits:(totalSamples-keysPerTimePoint-1);
 windowStartIdxs = 1:timePointStep_sampleUnits:(totalSamples-keysPerTimePoint+1);
 nWindows = length(windowStartIdxs);
-
 
 if(saveFullVol)
     warning('About to make a really big matrix!');
@@ -214,14 +210,10 @@ end
 start_time=tic;
 %% preallocate all arrays in memory, so we can have constant mem useage.
 tmpVol = zeros(overgrid_mat_size);% consider magBlank as we'll use this later
-%tmpComplexVol = complex(zeros(overgrid_mat_size));% oddly slow
 tmpComplexVol = complex(tmpVol,tmpVol);
-%sosComplexVol = complex(zeros(overgrid_mat_size)); % oddly slow
 sosComplexVol = complex(tmpVol,tmpVol);
 tmpData = zeros([1 keysPerTimePoint]);
-%tmpComplexData = complex(zeros([1 keysPerTimePoint]));% oddly slow
 tmpComplexData = complex(tmpData,tmpData);
-%dcf = complex(zeros([1 keysPerTimePoint]));
 dcf = complex(tmpData,tmpData);
 
 % startingTime = toc;
@@ -251,7 +243,6 @@ for iWin = 1:nWindows
     clear SG;
     fprintf('Creating SparseGrid window %i, massive memory expansion now.\n',iWin);
     SG = SparseGridder(windowTraj,mat_size,sharpness,extent,overgridding,opt_struct.nThreads);% mem rise 34->77->75
-       
        
     % Option 1 - dcf
     %% Computing density compensation weights
