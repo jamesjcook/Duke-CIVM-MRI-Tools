@@ -9,7 +9,14 @@ function sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out)
 % Modified into a function by James Cook.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
+% Relies on civm_matlab_common_utils 
+% retrievalable via git clone
+% https://git@github.com/jamesjcook/civm_matlab_comon_utils
+ 
+save_location='/Volumes/CivmUsers/omega/';
+if ~exist(save_location,'dir')
+    error('Fix save locaiton ');
+end
 
 %
 % code_path='/Users/james/Desktop/DCE_proto';
@@ -17,13 +24,22 @@ function sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out)
 % run([code_path '/GE-MRI-Tools/setup.m']);
 % run([code_path '/Non-Cartesian-Reconstruction/setup.m'])
 % u_dir='/Users/james/';
+p=fileparts(mfilename('fullpath'));
 if ~exist('data_buffer','var')
-    if ~exist('sliding_window_bigtest.mat','file')
+    if ~exist(fullfile(p,'sliding_window_bigtest.mat'),'file')&& ~exist('sliding_window_bigtest.mat','file')
         error('MUST HAVE A DATABUFFER TO CATCH OUTPUT');
     else
         warning('Loading test data!'); pause(2);
-        load('sliding_window_bigtest.mat');sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out);return;
+        if exist(fullfile(p,'sliding_window_bigtest.mat'),'file')
+            load(fullfile(p,'sliding_window_bigtest.mat'));
+        else
+            load('sliding_window_bigtest.mat');
+        end
+        sliding_window_recon(data_buffer,opt_struct,data_in,data_work,data_out);return;
     end
+end
+if ~exist(fullfile(p,'sliding_window_bigtest.mat'),'file')
+    save(fullfile(p,'sliding_window_bigtest.mat'),'data_buffer','opt_struct','data_in','data_work','data_out','-v7.3');
 end
 if ~exist('opt_struct','var')
     error('must have options for manual mode, specify at least options.dataFile')
@@ -59,7 +75,11 @@ else
     db_inplace('scott_grid');
 end
 
-%% Find directory containing all information
+%% VARIABLE OVERRRIDES
+saveFullVol = 0;
+
+    
+    %% Find directory containing all information
 % % reconDir = [u_dir '/Desktop/B03180/'];
 
 %% Read the header file to get scan info
@@ -83,6 +103,9 @@ else
     nRaysPerKey = data_in.rays_per_block;%1980;
     nAcq = data_in.ray_blocks/nKeys;%4;%11;
 end
+% nPts=ray_lengh
+% nRaysPerKey = as stated
+% nKeys is number of divisions of the trajectory
 samplesPerAcq = nPts*nRaysPerKey*nKeys;
 mat_size = 2*nPts*[1 1 1];
 if isfield(data_in,'ramp_points')
@@ -211,7 +234,7 @@ for iWin = 1:nWindows
         cropSosVol = complex(tv,tv);clear tv;
     end
     
-    %% Make a trajectory for each window
+    %% Make a trajectory for this window
     windowKeys = windowStartIdxs(iWin)+[1:keysPerTimePoint]-1;
     if(nAcq > 1)
         windowKeysTraj = mod(windowStartIdxs(iWin)+[1:keysPerTimePoint]-1,samplesPerAcq);
@@ -241,9 +264,12 @@ for iWin = 1:nWindows
 %         disp(['      DCF iter ' num2str(iDcfIter) '/' num2str(nPipeIter)])
         SG.grid(dcf,tmpVol);
         SG.ungrid(tmpVol,tmpData);
-        fig_id=disp_vol_center(tmpVol,1,100+iDcfIter);
-        if fig_id>0
-            set(fig_id,'Name',sprintf('kspace_dcf_i%i',iDcfIter));
+        %% display if we can
+        if exist('disp_vol_center','file')
+            fig_id=disp_vol_center(tmpVol,1,100+iDcfIter);
+            if fig_id>0
+                set(fig_id,'Name',sprintf('kspace_dcf_i%i',iDcfIter));
+            end
         end
         dcf = dcf./tmpData;
     end
@@ -276,9 +302,11 @@ for iWin = 1:nWindows
     % Finish SOS
     sosComplexVol = sqrt(sosComplexVol);
     sosComplexVol = ifftshift(sosComplexVol);
-    fig_id=disp_vol_center(sosComplexVol,0,310);
-    if fig_id>0
-        set(fig_id,'Name',sprintf('sosComplex'));
+    if exist('disp_vol_center','file')
+        fig_id=disp_vol_center(sosComplexVol,0,310);
+        if fig_id>0
+            set(fig_id,'Name',sprintf('sosComplex'));
+        end
     end
     % clear tmpComplexVol windowData;
     %% Compute deapodization volume for this traj
@@ -287,9 +315,11 @@ for iWin = 1:nWindows
         tmpData = ~any(windowTraj,1).*dcf;
         SG.grid(tmpData,tmpVol);
         tmpVol = ifftshift(ifftn(tmpVol));% mem rise 85->96->85
-        fig_id=disp_vol_center(tmpVol,0,311);
-        if fig_id>0
-            set(fig_id,'Name',sprintf('deapodize_filter'));
+        if exist('disp_vol_center','file')
+            fig_id=disp_vol_center(tmpVol,0,311);
+            if fig_id>0
+                set(fig_id,'Name',sprintf('deapodize_filter'));
+            end
         end
         if sum(nonzeros(tmpVol(:)))==0
             warning('Deapoidze failure, cannot deapodize');
@@ -298,9 +328,11 @@ for iWin = 1:nWindows
         end
     end
     % clear tmpData;
-    fig_id=disp_vol_center(sosComplexVol,0,312);
-    if fig_id>0
-        set(fig_id,'Name',sprintf('Complete_image_post_deapodize'));
+    if exist('disp_vol_center','file')
+        fig_id=disp_vol_center(sosComplexVol,0,312);
+        if fig_id>0
+            set(fig_id,'Name',sprintf('Complete_image_post_deapodize'));
+        end
     end
     % Crop volume
     if(cropVolume)
@@ -310,22 +342,22 @@ for iWin = 1:nWindows
             round([0.5*(SG.overgridSize+SG.gridSize)])]);
     end
     
-%     % Save/store this time point
-%     if(~saveFullVol)
-%         disp('   Saving Data');
-%         if(cropVolume)
-%             nii = make_nii(abs(cropSosVol));
-%         else
-%             nii = make_nii(abs(sosComplexVol));
-%         end
-%         save_nii(nii,['reconTime_' num2str(iWin) '.nii']);
-%     else
+    %% Save/store this time point
+    if(~saveFullVol)
+        disp('   Saving Data');
+        if(cropVolume)
+            nii = make_nii(abs(cropSosVol));
+        else
+            nii = make_nii(abs(sosComplexVol));
+        end
+        save_nii(nii,[save_location '/reconWin_' num2str(iWin) '.nii']);
+    else
         if(cropVolume)
             fullVolume(:,:,:,iWin) = cropSosVol;
         else
             fullVolume(:,:,:,iWin) = sosComplexVol;
         end
-%     end
+    end
     
     fprintf('Window %i completed.\n',iWin);
 %     % Compute remaining time
