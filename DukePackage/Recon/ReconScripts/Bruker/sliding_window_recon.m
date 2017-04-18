@@ -76,7 +76,7 @@ else
 end
 
 %% VARIABLE OVERRRIDES
-saveFullVol = 0;
+saveFullVol = 1;
 
 %% Read the header file to get scan info
 % nCoils      = coil count in acquision
@@ -85,6 +85,10 @@ saveFullVol = 0;
 % nKeys       = number of steps in full trajectory
 % nAcq        = repetitions of trajectory
 nKeys = 13;% in ergys terminology a fully sampled acq has this many steps.
+
+%The number of repetitions is called 'ray_block':
+%data_buffer.headfile.ray_blocks
+
 if isfield(data_buffer.headfile,'B_vol_type') ... 
         && isempty(regexpi(data_buffer.headfile.B_vol_type,'.*keyhole.*'))
     nKeys=1;
@@ -114,9 +118,34 @@ else
     nCoils = data_in.ds.Sub('c');%2;%4;          % coil count in acquision
     nRaysPerKey = data_in.rays_per_block;%1980;  % stepsize of trajectory
     nAcq = data_in.ray_blocks/nKeys;%4;%11;      % total number of output volumes AND steps in the data.
+    
+    %===================== ADDED BY JOHN =====================%
+    data_in.nRepetitions=nAcq; %number of times the same group of trajectories was repeated in the acquisition
+    data_in.nRaysPerRepetition=data_in.rays_per_block;
+    data_in.ReconstructionIncrement=51360;       % number of rays (+1) between subsequent reconstructions
+    data_in.WindowWidth=51360;      %Sliding window width (maximal width), MUST BE ODD NUMBER
+    if mod(data_in.WindowWidth,2)==0
+        data_in.WindowWidth=data_in.WindowWidth+1;
+    end;
+    
+%     %Test
+%     data_in.nRaysAcquired=18;
+%     data_in.WindowWidth=9;
+%     data_in.FirstUsed_RayIndex=3;
+%     data_in.ReconstructionIncrement=3;
+    
+    data_in.nRaysAcquired=data_in.nRepetitions*data_in.nRaysPerRepetition;
+    data_in.FirstUsed_RayIndex=1; %We could discard and leave unused a number of rays at the beginning of the data
+    nRaysSurroundedByFullWindow=floor((data_in.nRaysAcquired-(data_in.WindowWidth-1)-data_in.FirstUsed_RayIndex)/...
+        data_in.ReconstructionIncrement)*data_in.ReconstructionIncrement+1;
+    data_in.nReconstructions=1+floor((nRaysSurroundedByFullWindow-1)/data_in.ReconstructionIncrement);  % number fo volumes reconstructed (or time points)
+    data_in.FirstRecon_RayIndex=(data_in.WindowWidth-1)/2+data_in.FirstUsed_RayIndex; 
+    data_in.LastRecon_RayIndex=(data_in.WindowWidth-1)/2+data_in.FirstUsed_RayIndex+(data_in.nReconstructions-1)*data_in.ReconstructionIncrement; 
+    data_in.LastUsed_RayIndex=data_in.LastRecon_RayIndex+(data_in.WindowWidth-1)/2; 
+
 end
 
-samplesPerAcq = nPts*nRaysPerKey*nKeys;
+%samplesPerAcq = nPts*data_in.ReconstructionIncrement*nKeys;
 mat_size = 2*nPts*[1 1 1];
 if isfield(data_in,'ramp_points')
     mat_size = 2*(nPts-data_in.ramp_points)*[1 1 1];
@@ -125,12 +154,25 @@ end
 overgrid_mat_size = ceil(mat_size.*overgridding);
 overgridding = overgrid_mat_size./mat_size;
 
-%% Sliding window parameters
-keysPerTimePoint = nRaysPerKey*nKeys*nPts; % 
-timePointStep_sampleUnits = round(keysPerTimePoint/nKeys); % percent of keysPerTimePoint
-
+% %% Sliding window parameters
+% %     keysPerTimePoint = nRaysPerKey*nKeys*nPts; % 
+% %     timePointStep_sampleUnits = round(keysPerTimePoint/nKeys); % percent of keysPerTimePoint
+% 
+%     %===================== ADDED BY JOHN =====================%
+%     nPtsPerReconstruction=nPts*data_in.WindowWidth; % number of points included in a reconstruction increment
+%     data_in.ReconstructionIncrement=10000;       % number of rays (+1) between subsequent reconstructions
+%     data_in.nReconstructions=floor(data_in.ray_blocks*data_in.rays_per_block/data_in.ReconstructionIncrement)  % number fo volumes reconstructed (or time points)
+%     
+%     % transfer to legacy terminology
+%     keysPerTimePoint = nPtsPerReconstructionIncrement;
+%     timePointStep_sampleUnits = round(keysPerTimePoint/nKeys); % percent of keysPerTimePoint
+%     
+%     %=================== END ADDED BY JOHN ===================%
+% 
 %% Read/reshape fid data, 
-expected_dims=[nPts nCoils nRaysPerKey nKeys nAcq];
+expected_dims=[nPts nCoils data_in.WindowWidth data_in.nReconstructions];
+%expected_dims=[nPts nCoils data_in.nRaysPerRepetition data_in.nRepetitions];
+%expected_dims=[nPts nCoils nRaysPerKey nKeys nAcq];
 while expected_dims(end)==1
     expected_dims(end)=[];
 end
@@ -143,16 +185,43 @@ if ~isprop(data_buffer,'radial')
         data = reshape(data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
         data = permute(data,[1 3 4 5 2]);% Make coil last dimmension
         data = reshape(data,[nPts nRaysPerKey*nKeys nAcq nCoils]); % Vectorize all but coil dimmension
+        
+        % KEYS MUST BE REMOVED FROM ABOVE
+        
+        
     else
-        data = reshape(data_buffer.data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
+        %===================== ADDED BY JOHN =====================%
+        %the original size is Y x data_in.nRepetitions x data_in.nRaysPerRepetition
+        %we need: Y x x data_in.nReconstructions x data_in.ReconstructionIncrement
+        Y=length(data_buffer.data)/(data_in.nRepetitions*data_in.nRaysPerRepetition);
+        
+%         data_in.ReconstructionIncrement=3;
+%         data_in.WindowWidth=9;
+%         data_in.FirstUsed_RayIndex=2;
+        data=zeros(1,(data_in.WindowWidth*data_in.nReconstructions)*Y);
+        
+        %Sorry for the loop
+        for WhichReconIndex=1:data_in.nReconstructions
+            ThisRecon_RayIndex=(data_in.WindowWidth-1)/2+data_in.FirstUsed_RayIndex+(WhichReconIndex-1)*data_in.ReconstructionIncrement;
+            DataStartIndex=ThisRecon_RayIndex-(data_in.WindowWidth-1)/2;
+            DataEndIndex=ThisRecon_RayIndex+(data_in.WindowWidth-1)/2;
+            ThisData=data_buffer.data(1,Y*(DataStartIndex-1)+1:Y*DataEndIndex);
+            data(1,Y*data_in.WindowWidth*(WhichReconIndex-1)+1:Y*data_in.WindowWidth*WhichReconIndex)=ThisData;
+        end;
+            
+        %=================== END ADDED BY JOHN ===================%
+        
+        %data = reshape(data_buffer.data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
+        %data = reshape(data,[nPts nCoils data_in.nRaysPerRepetition data_in.nRepetitions]); % put data into matrix form
+        data = reshape(data,[nPts nCoils data_in.WindowWidth data_in.nReconstructions]); % put data into matrix form
         data_buffer.data=[];
         if numel(data) ~= prod(expected_dims) ...
                 || sum(size(data) ~= expected_dims)>0
             db_inplace('scott_grid','data didnt shape up');
         end
         data = permute(data,[1 3 4 5 2]);% Make coil last dimmension
-        data = reshape(data,[nPts nRaysPerKey*nKeys nAcq nCoils]); % Vectorize all but coil dimmension
-    end
+        data = reshape(data,[nPts data_in.WindowWidth data_in.nReconstructions nCoils]); % Vectorize all but coil dimmension
+    end  
     data_buffer.addprop('radial');
     data_buffer.radial=data;
 else
@@ -160,7 +229,23 @@ else
 end
 
 %% Read/reshape in trajectory
-expected_dims=[3 nPts nRaysPerKey nKeys];
+%===================== ADDED BY JOHN =====================%
+expected_dims=[3 nPts data_in.WindowWidth data_in.nReconstructions];
+%expected_dims=[3 nPts nRaysPerKey nKeys];
+traj_rep=repmat(data_buffer.trajectory,[1 1 data_in.nRepetitions]);
+data_buffer.trajectory=[];
+
+%Sorry for the loop
+data_traj=zeros(3,nPts,data_in.WindowWidth*data_in.nReconstructions);
+for WhichReconIndex=1:data_in.nReconstructions
+    ThisRecon_RayIndex=(data_in.WindowWidth-1)/2+data_in.FirstUsed_RayIndex+(WhichReconIndex-1)*data_in.ReconstructionIncrement;
+    DataStartIndex=ThisRecon_RayIndex-(data_in.WindowWidth-1)/2;
+    DataEndIndex=ThisRecon_RayIndex+(data_in.WindowWidth-1)/2;
+    ThisData=traj_rep(:,:,DataStartIndex:DataEndIndex);
+    data_traj(:,:,(WhichReconIndex-1)*data_in.WindowWidth+1:WhichReconIndex*data_in.WindowWidth)=ThisData;
+end;
+clear traj_rep;
+
 if ~isprop(data_buffer,'straj')
     if ~isprop(data_buffer,'trajectory')
         trajectory_name='traj';
@@ -169,18 +254,32 @@ if ~isprop(data_buffer,'straj')
         fid = fopen(trajFile);
         traj = fread(fid,inf,'double');
         fclose(fid);
-        traj = reshape(traj,[3 nPts nRaysPerKey nKeys]); % put trajectory into matrix form
+        
+        %===================== ADDED BY JOHN =====================%
+        %we need the file to be longer (include all repetitions)
+        %THIS PART OF CODE NOT FUNCTIONAL YET
+        traj = repmat(traj,[1 data_in.nRepetitions]);
+        traj = reshape(traj,[nPts nRaysPerKey*nKeys*data_in.nRepetitions 3]); % vectorize keys and Acq
+        traj = reshape(traj,[3 nPts nRaysPerKey*data_in.nRepetitions nKeys]); % put trajectory into matrix form
         traj = permute(traj,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
-        traj = reshape(traj,[nPts nRaysPerKey*nKeys 3]); % vectorize keys and Acq
+        %=================== END ADDED BY JOHN ===================%
+        
+%         traj = reshape(traj,[nPts nRaysPerKey*nKeys 3]); % vectorize keys and Acq
+%         traj = reshape(traj,[3 nPts nRaysPerKey nKeys]); % put trajectory into matrix form
+%         traj = permute(traj,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
+        
+        
     else
-        if numel(data_buffer.trajectory) ~= prod(expected_dims) %...
+        if numel(data_traj) ~= prod(expected_dims) %...
+        %if numel(data_buffer.trajectory) ~= prod(expected_dims) %...
                % || sum(size(data_buffer.trajectory) ~= expected_dims)>0
             db_inplace('sliding_window_recon','traj didnt shape up');
         end
-        traj = permute(data_buffer.trajectory,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
-        data_buffer.trajectory=[];
+        traj = permute(data_traj,[2 3 4 1]); % Put [kx,ky,kz] dimmension last
+        data_traj=[];
     end
-    traj = reshape(traj,[nPts nRaysPerKey*nKeys 3]); % vectorize keys and Acq
+    traj = reshape(traj,[nPts data_in.WindowWidth*data_in.nReconstructions 3]);
+%    traj = reshape(traj,[nPts nRaysPerKey*nKeys 3]); % vectorize keys and Acq
     data_buffer.addprop('straj');
     data_buffer.straj=traj;
 else
@@ -189,13 +288,21 @@ end
 
 %% Vectorize data and traj
 % traj is rl*rpk*k*3
-traj = reshape(traj,[samplesPerAcq 3])'; % vectorize all but [kx,ky,kz] dimmension
-data = reshape(data,[samplesPerAcq*nAcq nCoils])'; % Vectorize all but coil dimmension
+traj = reshape(traj,[nPts*data_in.WindowWidth*data_in.nReconstructions 3])'; % vectorize all but [kx,ky,kz] dimmension
+data = reshape(data,[nPts*data_in.WindowWidth*data_in.nReconstructions nCoils])'; % Vectorize all but coil dimmension
+%traj = reshape(traj,[samplesPerAcq 3])'; % vectorize all but [kx,ky,kz] dimmension
+%data = reshape(data,[samplesPerAcq*nAcq nCoils])'; % Vectorize all but coil dimmension
 
 %% Perform sliding window Reconstruction
-totalSamples = samplesPerAcq*nAcq; % all keys, acqs
-windowStartIdxs = 1:timePointStep_sampleUnits:(totalSamples-keysPerTimePoint+1);
-nWindows = length(windowStartIdxs);
+totalSamples = nPts*data_in.WindowWidth*data_in.nReconstructions; % all keys, acqs
+%totalSamples = samplesPerAcq*nAcq; % all keys, acqs
+% windowStartIdxs = 1:timePointStep_sampleUnits:(totalSamples-keysPerTimePoint+1);
+% nWindows = length(windowStartIdxs);
+windowStartIdxs=nPts*(data_in.FirstUsed_RayIndex-1)+1:nPts*data_in.WindowWidth:nPts*(data_in.LastRecon_RayIndex-(data_in.WindowWidth-1)/2);
+%windowStartIdxs=data_in.FirstUsed_RayIndex:data_in.WindowWidth:data_in.LastRecon_RayIndex-(data_in.WindowWidth-1)/2;
+nWindows=data_in.nReconstructions;
+keysPerTimePoint=data_in.WindowWidth*nPts;
+samplesPerAcq=data_in.WindowWidth*nPts;
 
 if(saveFullVol)
     warning('About to make a really big matrix!');
@@ -219,7 +326,7 @@ dcf = complex(tmpData,tmpData);
 % startingTime = toc;
 % parfor iWin = 1:nWindows
 fprintf('begin grid operations by window\n');
-for iWin = 1:nWindows
+for iWin=1:nWindows
 %     disp(['Reconstructing ' num2str(iWin) '/' num2str(nWindows) ' traj subsets']);
     if(cropVolume)
         tv=zeros(mat_size);
@@ -227,13 +334,14 @@ for iWin = 1:nWindows
     end
     
     %% Make a trajectory for this window
-    windowKeys = windowStartIdxs(iWin)+[1:keysPerTimePoint]-1;
-    if(nAcq > 1)
-        windowKeysTraj = mod(windowStartIdxs(iWin)+[1:keysPerTimePoint]-1,samplesPerAcq);
-        windowKeysTraj(windowKeysTraj==0)=samplesPerAcq;
-        windowTraj = squeeze(traj(:,windowKeysTraj));
+%     windowKeys = windowStartIdxs(iWin)+[1:keysPerTimePoint]-1;
+    if(data_in.nReconstructions>1)
+%         windowKeysTraj = mod(windowStartIdxs(iWin)+[1:keysPerTimePoint]-1,samplesPerAcq);
+%         windowKeysTraj(windowKeysTraj==0)=samplesPerAcq;
+        windowTraj=traj(:,(iWin-1)*data_in.WindowWidth*nPts+1:iWin*data_in.WindowWidth*nPts);
     else
-        windowTraj = squeeze(traj(:,windowKeys));
+        windowTraj = squeeze(traj(:,(iWin-1)*data_in.WindowWidth*nPts+1:iWin*data_in.WindowWidth*nPts));
+        %THIS CASE HAS NOT BEEN RESOLVED
     end
     
     %% Construct system model for this trajectory This is a BIG OPERATION.
@@ -278,7 +386,7 @@ for iWin = 1:nWindows
     % sosComplexVol = sosComplexVol.*(0+0i); % mem rise 74->85, interestingly this just delays when memory is used, and slows down later operations.
     
     % Create a data matrix of all repetitions of this trajectory
-    windowData = double(data(:,windowKeys));
+    windowData = double(data(:,(iWin-1)*data_in.WindowWidth*nPts+1:iWin*data_in.WindowWidth*nPts));
     for iCoil = 1:nCoils
         % Apply dcf
         windowData(iCoil,:)  = windowData(iCoil,:).*dcf;
@@ -334,7 +442,7 @@ for iWin = 1:nWindows
     end
     
     %% Save/store this time point
-    if(~saveFullVol)
+    if(saveFullVol)
         disp('   Saving Data');
         if(cropVolume)
             nii = make_nii(abs(cropSosVol));
@@ -342,6 +450,8 @@ for iWin = 1:nWindows
             nii = make_nii(abs(sosComplexVol));
         end
         save_nii(nii,[save_location '/reconWin_' num2str(iWin) '.nii']);
+        fprintf('Saving Window %i completed.\n',iWin);
+
     else
         if(cropVolume)
             fullVolume(:,:,:,iWin) = cropSosVol;
