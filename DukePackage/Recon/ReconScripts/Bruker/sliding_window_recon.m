@@ -120,12 +120,42 @@ else
     nAcq = data_in.ray_blocks/nKeys;%4;%11;      % total number of output volumes AND steps in the data.
     
     %===================== ADDED BY JOHN =====================%
+    
+%     %Do this part without KFiltering
+%     data_in.nRepetitions=nAcq; %number of times the same group of trajectories was repeated in the acquisition
+%     data_in.nRaysPerRepetition=data_in.rays_per_block; %205634 for 256^3
+%     data_in.FirstReconIndex=25704; %Quarter a Full Sample
+%     data_in.ReconstructionIncrement=8000 %1/16th of a Full Sample        6425 %1/16th of a Full Sample  %25704;         % number of rays (+1) between subsequent reconstructions
+%     data_in.WindowWidth=8000; %1/16th of a Full Sample      %Sliding window width (maximal width), MUST BE ODD NUMBER
+%     data_in.nRaysFullWeightAtKZero=0; %not used when no k-filtration
+%     data_in.nRaysFullWeightAtKMax=data_in.WindowWidth;
+%     data_in.DoKFiltering=0;
+    
+    %Do this part without KFiltering
     data_in.nRepetitions=nAcq; %number of times the same group of trajectories was repeated in the acquisition
-    data_in.nRaysPerRepetition=data_in.rays_per_block;
-    data_in.ReconstructionIncrement=51360;       % number of rays (+1) between subsequent reconstructions
-    data_in.WindowWidth=51360;      %Sliding window width (maximal width), MUST BE ODD NUMBER
+    data_in.nRaysPerRepetition=data_in.rays_per_block; %205634 for 256^3
+    data_in.FirstReconIndex=25704; %Quarter a Full Sample
+    data_in.ReconstructionIncrement=8000 %1/16th of a Full Sample        6425 %1/16th of a Full Sample  %25704;         % number of rays (+1) between subsequent reconstructions
+    data_in.WindowWidth=51408-1; %1/16th of a Full Sample      %Sliding window width (maximal width), MUST BE ODD NUMBER
+    data_in.nRaysFullWeightAtKZero=0; %not used when no k-filtration
+    data_in.nRaysFullWeightAtKMax=data_in.WindowWidth;
+    data_in.DoKFiltering=0;
+    
+%     %Do part with KFiltering
+%     data_in.nRepetitions=nAcq; %number of times the same group of trajectories was repeated in the acquisition
+%     data_in.nRaysPerRepetition=data_in.rays_per_block; %205634 for 256^3
+%     data_in.FirstReconIndex=25704;
+%     data_in.ReconstructionIncrement=8000 %12847 %1/16th of a Full Sample       %25704;         % number of rays (+1) between subsequent reconstructions
+%     data_in.WindowWidth=51408-1; %1/4th of a Full Sample      %Sliding window width (maximal width), MUST BE ODD NUMBER
+%     data_in.nRaysFullWeightAtKZero=8000; %1/16th of a Full Sample  %Must be odd
+%     data_in.nRaysFullWeightAtKMax=data_in.WindowWidth;
+%     data_in.DoKFiltering=1;
+
     if mod(data_in.WindowWidth,2)==0
-        data_in.WindowWidth=data_in.WindowWidth+1;
+        data_in.WindowWidth=data_in.WindowWidth-1;
+    end;
+    if mod(data_in.nRaysFullWeightAtKZero,2)==0
+        data_in.nRaysFullWeightAtKZero=data_in.nRaysFullWeightAtKZero-1;
     end;
     
 %     %Test
@@ -135,7 +165,7 @@ else
 %     data_in.ReconstructionIncrement=3;
     
     data_in.nRaysAcquired=data_in.nRepetitions*data_in.nRaysPerRepetition;
-    data_in.FirstUsed_RayIndex=1; %We could discard and leave unused a number of rays at the beginning of the data
+    data_in.FirstUsed_RayIndex=data_in.FirstReconIndex-(data_in.WindowWidth-1)/2; %We could discard and leave unused a number of rays at the beginning of the data
     nRaysSurroundedByFullWindow=floor((data_in.nRaysAcquired-(data_in.WindowWidth-1)-data_in.FirstUsed_RayIndex)/...
         data_in.ReconstructionIncrement)*data_in.ReconstructionIncrement+1;
     data_in.nReconstructions=1+floor((nRaysSurroundedByFullWindow-1)/data_in.ReconstructionIncrement);  % number fo volumes reconstructed (or time points)
@@ -200,15 +230,45 @@ if ~isprop(data_buffer,'radial')
 %         data_in.FirstUsed_RayIndex=2;
         data=zeros(1,(data_in.WindowWidth*data_in.nReconstructions)*Y);
         
+        %We Create the K-Filter       
+        KFilter=logical(ones(nPts,data_in.WindowWidth,1,1));
+        for ThisKPoint=1:nPts
+            if ThisKPoint<=data_in.ramp_points
+                NumberOfRaysAtFullWeight=data_in.nRaysFullWeightAtKZero;
+            else
+                ThisKPointAfterRamp=ThisKPoint-data_in.ramp_points;
+                NumberOfRaysAtFullWeight=...
+                    (data_in.WindowWidth-data_in.nRaysFullWeightAtKZero)/data_in.ray_length...
+                    *ThisKPointAfterRamp+data_in.nRaysFullWeightAtKZero;
+            end;
+            
+            for ThisRayIndex=1:data_in.WindowWidth
+                if or(ThisRayIndex<(data_in.WindowWidth-NumberOfRaysAtFullWeight)/2,ThisRayIndex>(data_in.WindowWidth-NumberOfRaysAtFullWeight)/2+NumberOfRaysAtFullWeight)
+                    ToggleValue=0;
+                else
+                    ToggleValue=1;
+                end;
+                if ~data_in.DoKFiltering %FORCES 'NO FILTER'
+                    ToggleValue=1;
+                end;
+                KFilter(ThisKPoint,ThisRayIndex,1,:)=ToggleValue;
+            end;
+        end;
+        
+        figure(3),subplot(2,2,1),imagesc(KFilter),colorbar,drawnow;            
+        DensityCompensation=size(KFilter,2);
+        KFilterCompensated=KFilter*DensityCompensation./repmat(sum(KFilter,2),1,size(KFilter,2));
+        figure(3),subplot(2,2,2),imagesc(KFilterCompensated),colorbar,drawnow;            
+        
         %Sorry for the loop
         for WhichReconIndex=1:data_in.nReconstructions
             ThisRecon_RayIndex=(data_in.WindowWidth-1)/2+data_in.FirstUsed_RayIndex+(WhichReconIndex-1)*data_in.ReconstructionIncrement;
             DataStartIndex=ThisRecon_RayIndex-(data_in.WindowWidth-1)/2;
             DataEndIndex=ThisRecon_RayIndex+(data_in.WindowWidth-1)/2;
-            ThisData=data_buffer.data(1,Y*(DataStartIndex-1)+1:Y*DataEndIndex);
+            ThisData=data_buffer.data(1,Y*(DataStartIndex-1)+1:Y*DataEndIndex); %Each chunk of data = one Sliding Window Width
             data(1,Y*data_in.WindowWidth*(WhichReconIndex-1)+1:Y*data_in.WindowWidth*WhichReconIndex)=ThisData;
         end;
-            
+        clear ThisData;  
         %=================== END ADDED BY JOHN ===================%
         
         %data = reshape(data_buffer.data,[nPts nCoils nRaysPerKey nKeys nAcq]); % put data into matrix form
@@ -221,7 +281,11 @@ if ~isprop(data_buffer,'radial')
         end
         data = permute(data,[1 3 4 5 2]);% Make coil last dimmension
         data = reshape(data,[nPts data_in.WindowWidth data_in.nReconstructions nCoils]); % Vectorize all but coil dimmension
-    end  
+        figure(3),subplot(2,2,3),imagesc(squeeze(abs(data(:,:,1,1)))),colorbar,drawnow;
+        data = data.*repmat(KFilterCompensated,[1 1 data_in.nReconstructions nCoils]);
+        figure(3),subplot(2,2,4),imagesc(squeeze(abs(data(:,:,1,1)))),colorbar,drawnow;            
+
+    end
     data_buffer.addprop('radial');
     data_buffer.radial=data;
 else
