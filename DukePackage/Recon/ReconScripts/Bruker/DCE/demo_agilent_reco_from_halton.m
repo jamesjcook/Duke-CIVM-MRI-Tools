@@ -58,7 +58,10 @@ if ~IAMSCOTT
 %     reconDir = [u_dir '/ser15.fid']; % sl() fa(68.2400) TR=12
 %     reconDir = [u_dir '/ser16.fid']; % sl() fa(67.6260)  TR=24
     % pt_index= pt_index=[0,1,2,3]  nv=16384 (65536 total)
-     reconDir = [u_dir '/ser17.fid']; % sl() fa(137.3230)
+%      reconDir = [u_dir '/ser17.fid']; % sl() og 1.0 fa(137.3230) og 1.2 fa(276.7263)
+     % set overgridding to 
+     reconDir = [u_dir '/ser18.fid']; % sl() fa() 
+
    
 else
 end
@@ -98,8 +101,9 @@ scale = 1;
 % oversampling = 1.5;
 oversampling = 1;
 if ~rs
-oversampling = 1;
+    oversampling = 1;
 end
+% oversampling = 1.2;
 % Sharpness is a key parameter that tradesoff SNR and resolution.
 % making sharpness smaller will blurr the object,
 % but increase SNR and vice versa.
@@ -240,6 +244,8 @@ unscaled_size = 2*nPts*[1 1 1];
 scaled_output_size = round(scale*unscaled_size);
 scale = scaled_output_size(1)/unscaled_size(1);
 overgrid_mat_size = 2*ceil(scaled_output_size*oversampling/2);
+oversampling=overgrid_mat_size/scaled_output_size; % update over sampling 
+
 if(crop)
     reconMatSize = scaled_output_size;
 else
@@ -440,5 +446,5 @@ if IAMSCOTT
     imslice(abs(slidingWindowReconVol),sprintf('imgspace %i',volfig_id));
 else
     disp_vol_center(slidingWindowReconVol,0,volfig_id);
-    save_nii(make_nii(abs(slidingWindowReconVol)),sprintf('%s_%s.nii',reconDir,reco_speed));
+    save_nii(make_nii(abs(slidingWindowReconVol)),sprintf('%s_%s%05.2f.nii',reconDir,reco_speed,oversampling));
 end
