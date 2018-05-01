@@ -6,42 +6,42 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 IAMSCOTT=false
+%% sort out code paths and setup stuff.
 if ~IAMSCOTT
-% code_path='/Users/james/Desktop/DCE_proto';
-code_path='/Volumes/workstation_home/software/recon/External/ScottHaileRobertson';
-run([code_path '/Duke-CIVM-MRI-Tools/setup.m']);
-run([code_path '/GE-MRI-Tools/setup.m']);
-run([code_path '/Non-Cartesian-Reconstruction/setup.m'])
+    % code_path='/Users/james/Desktop/DCE_proto';
+    WKS_HOME=getenv('WORKSTATION_HOME');
+    if isempty(WKS_HOME)
+        WKS_cf=fullfile('/Volumes/workstation_home/','software');
+    else
+        WKS_cf=WKS_HOME;
+    end
+    if isdir(WKS_cf)
+        %code_path='/Volumes/workstation_home/software/recon/External/ScottHaileRobertson';
+        code_path=fullfile(WKS_HOME,'recon','External','ScottHaileRobertson');
+        packages=strsplit('Duke-CIVM-MRI-Tools GE-MRI-Tools Non-Cartesian-Reconstruction');
+        % compiles fail on for civm cluster, beacuse mex compile has to be done out of band with gcc6.3 due to matlab errors.
+        for p=1:numel(packages)
+            run(fullfile(code_path,packages{p},'setup.m'));
+        end
+    end
+end
+try
+    profile('-memory','on');
+catch
+    profile off
+    profile('-memory','on');
 end
 %% Set acq directory containing all information
+% or just load a .mat file
 if ~IAMSCOTT
     if exist('reconDir','var')
         lastReco=reconDir;
     else
         lastReco='';
     end
-    u_dir='/delosspace/S68003_10';
+    u_dir=fullfile(getenv('BIGGUS_DISKUS'),'S68003_10');
     %% Axial scan ordering.
-    %% rad011
-    % ser02, and ser 03 were testing effect of nf independent from nv.
-    % they just result in lots of zeros written. 
-    % nf=2048 nv=4096
-    %     reconDir = [u_dir '/ser02.fid'];
-    % nf=4096 nv=4096
-    %     reconDir = [u_dir '/ser03.fid'];
-    % nf=1 nv=4096, shows normal fid
-    %     reconDir = [u_dir '/ser04.fid'];
-    % ser06 ser07 ser look at changing block size.
-    %     reconDir = [u_dir '/ser06.fid']; % bs=1024
-    %     reconDir = [u_dir '/ser07.fid']; % bs=4096
-    %     reconDir = [u_dir '/ser08.fid']; % bs=1
-    % using magic array in vnmrj to rerun main real-time loop.
-    % nv=1024 pt_index=[0,nv,2*nv,3*nv]
-    % first run has apparent seek failure : (
-%     reconDir = [u_dir '/ser17.fid']; % bs=16
-%     reconDir = [u_dir '/ser13.fid']; % bs=16
     %% rad3d002
-    u_dir='/delosspace/S68003_10';
     % per pt loading implemented in 
     % np=128
     % pt_index=[0,1,2] nv=1024 (3072 total)
@@ -53,14 +53,16 @@ if ~IAMSCOTT
     % pt_index= pt_index=[0]  nv=20480 (20480 total)
 %     reconDir = [u_dir '/ser13.fid']; % sl 163.1256
     % pt_index= pt_index=[0,1,2,3]  nv=16384 (65536 total)
-%     reconDir = [u_dir '/ser14.fid']; % sl crashed
+%     reconDir = [u_dir '/ser14.fid']; % sl crashed on cluster, ~ 100-120 GiB used and 1110.655945 seconds for slow
     % np=256 pt_index= pt_index=[0,1,2,3]  nv=1024 (4096 total)
 %     reconDir = [u_dir '/ser15.fid']; % sl() fa(68.2400) TR=12
 %     reconDir = [u_dir '/ser16.fid']; % sl() fa(67.6260)  TR=24
     % pt_index= pt_index=[0,1,2,3]  nv=16384 (65536 total)
 %      reconDir = [u_dir '/ser17.fid']; % sl() og 1.0 fa(137.3230) og 1.2 fa(276.7263)
      % set overgridding to 
-     reconDir = [u_dir '/ser18.fid']; % sl() fa() 
+%       reconDir = [u_dir '/ser18.fid']; % sl() fa(567.389) 
+      reconDir = [u_dir '/ser19.fid']; % sl() fa(215.8760)
+      reconDir = [u_dir '/ser20.fid']; % sl() fa(1.6719e+03) ) 
 
    
 else
@@ -68,14 +70,14 @@ end
 % should  try to calc this, its based on dwell time. 
 % It should be some constant amount of time. 
 garbagePts=3;%garbagePts=3;
-reco_speed='slow';
-reco_speed='fast';
-% first pass, we're looksing 200us on garbage. 
-acqdelay=50e-6;% this is hard set in our radial code right now, only in rad007
+acqdelay=50e-6;% this is hard set in our radial code right now, in rad3ddw007 forward and rad3d002 forward
 trajShift=1;% + numbers add more pts to contibute to k0 
 % in testing, what we really want is a trajectory offset, our first pt is
 % probably not exactly the 0th point. 
 
+%% gross reco settings fast/slow
+reco_speed='slow';
+reco_speed='fast';
 
 if strcmp(reco_speed,'fast')
     rs=0; 
@@ -87,7 +89,8 @@ elseif strcmp(reco_speed,'slow')
 else
     
 end
-%% Slow (but decent) Reconstruction parameters
+
+%% fine Reconstruction parameters where we set what fast/slow mean
 scale = 1;
 
 % For oversampling use at least 2. To tune the value, turn "crop" off 
@@ -261,7 +264,7 @@ windowStep = nPts*nRaysPerKey*nKeys; % Step by one key of data
 %% adjust data n points of garbage
 if garbagePts>0
     data(1:garbagePts,:)=0;
-    %%% initial idea was to move garbage to end of array where zeros are
+    %%% initial idea was to move garbage to eprofilend of array where zeros are
     %%% kinda expected. Unclear which gives better results. 
     %data=circshift(data,[-garbagePts,0]);
 end
@@ -275,15 +278,16 @@ figure();imagesc(log(abs(data)));
 %}
 %% flesh out the halton sequence
 if ~IAMSCOTT
-    haltonFile = [ '/delosspace/'  '/Halton_trajpoints_1GiB.dat'];
+%     haltonFile = [ '/delosspace/'  '/Halton_trajpoints_1GiB.dat'];
+    haltonFile=fullfile(getenv('WORKSTATION_DATA'),'trajectory','Halton_trajpoints_1GiB.dat');
     trajFile = [ reconDir  '/traj'];
 else
     haltonFile='trajpoints.dat';
     trajFile= 'traj';
 end
-% if ~exist(trajFile,'file')
+if ~exist(trajFile,'file')
     sim_traj(trajFile,haltonFile,nPts,nRaysPerKey*nKeys,-(garbagePts+trajShift),0.00*(1/nPts));%
-% end
+end
 
 %% Read in trajectory
 fid = fopen(trajFile);
@@ -444,7 +448,12 @@ reconTime = toc(startTime)
 volfig_id=200+garbagePts+10*trajShift+10000*rs;
 if IAMSCOTT
     imslice(abs(slidingWindowReconVol),sprintf('imgspace %i',volfig_id));
+    profile viewer
 else
     disp_vol_center(slidingWindowReconVol,0,volfig_id);
-    save_nii(make_nii(abs(slidingWindowReconVol)),sprintf('%s_%s%05.2f.nii',reconDir,reco_speed,oversampling));
+    outfile=sprintf('%s_%s%05.2f.nii',reconDir,reco_speed,oversampling);
+    profout=sprintf('%s_%s%05.2f.profile',reconDir,reco_speed,oversampling);
+    fprintf('saving %s\n',outfile);
+    save_nii(make_nii(abs(slidingWindowReconVol)),outfile);
+    profsave(profile('info'),profout);
 end
