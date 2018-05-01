@@ -68,6 +68,8 @@ tfid=fopen(trajFile,'w');
 traj_p=fread(hfid,3*rayCount,'double',0,'l');
 traj_p=reshape(traj_p,[3,rayCount]);
 g_delay=[0.0,0.0,0.0];% delays for each gradient. 
+fprintf('Preparing full trajectory for %i rays with %i pts each\n',rayCount,nPts);
+fprintf('This could be a while : ( \n');
 for tn=1:rayCount
     dx=traj_p(:,tn);
     l=zeros(3,nPts);
