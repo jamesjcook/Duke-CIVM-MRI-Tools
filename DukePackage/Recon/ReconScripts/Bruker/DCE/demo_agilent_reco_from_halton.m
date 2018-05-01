@@ -61,9 +61,19 @@ if ~IAMSCOTT
 %      reconDir = [u_dir '/ser17.fid']; % sl() og 1.0 fa(137.3230) og 1.2 fa(276.7263)
      % set overgridding to 
 %       reconDir = [u_dir '/ser18.fid']; % sl() fa(567.389) 
-      reconDir = [u_dir '/ser19.fid']; % sl() fa(215.8760)
-      reconDir = [u_dir '/ser20.fid']; % sl() fa(1.6719e+03) ) 
-
+%       reconDir = [u_dir '/ser19.fid']; % sl() fa(215.8760)
+%       reconDir = [u_dir '/ser20.fid']; % sl() fa(1.6719e+03) ) 
+     %% rad3ddw014 adding diffusion stuff back, 
+     % np=128, pt_index=0, pt_index_skip=1 nv=3072
+%      reconDir = [u_dir '/ser24.fid']; % sl() fa(4.9464)  diffusion  panel
+%      disabled using minTE and minTR
+%      all 1 not sure).
+%      reconDir = [u_dir '/ser25.fid']; % sl() fa(4.9592) diffusion off dro=0,dpe=0,dsl=1
+%      reconDir = [u_dir '/ser26.fid']; % sl() fa(4.1793) diffusion off dro=0,dpe=1,dsl=0
+%      reconDir = [u_dir '/ser27.fid']; % sl() fa(4.1824) diffusion off dro=1,dpe=0,dsl=0
+%      reconDir = [u_dir '/ser28.fid']; % sl() fa(4.1868) diffusion off dro=1,dpe=1,dsl=1
+%       reconDir = [u_dir '/ser29.fid']; % sl() fa(4.5535) diffusion off dro=0.001,dpe=0.001,dsl=0.001
+%       reconDir = [u_dir '/ser30.fid']; % sl() fa(4.2394) diffusion panel disabled, kept TR and TE from the diffusion scans
    
 else
 end
