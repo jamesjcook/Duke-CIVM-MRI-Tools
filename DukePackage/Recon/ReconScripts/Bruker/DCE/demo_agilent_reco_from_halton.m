@@ -6,6 +6,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 IAMSCOTT=false
+testing=false
 %% sort out code paths and setup stuff.
 if ~IAMSCOTT
     % code_path='/Users/james/Desktop/DCE_proto';
@@ -25,11 +26,13 @@ if ~IAMSCOTT
         end
     end
 end
-try
-    profile('-memory','on');
-catch
-    profile off
-    profile('-memory','on');
+if testing
+    try
+        profile('-memory','on');
+    catch
+        profile off
+        profile('-memory','on');
+    end
 end
 %% Set acq directory containing all information
 % or just load a .mat file
@@ -39,7 +42,7 @@ if ~IAMSCOTT
     else
         lastReco='';
     end
-    u_dir=fullfile(getenv('BIGGUS_DISKUS'),'S68003_10');
+    u_dir=fullfile(getenv('BIGGUS_DISKUS'),'S68003_11');
     %% Axial scan ordering.
     %% rad3d002
     % per pt loading implemented in 
@@ -62,8 +65,12 @@ if ~IAMSCOTT
      % set overgridding to 
 %       reconDir = [u_dir '/ser18.fid']; % sl() fa(567.389) 
 %       reconDir = [u_dir '/ser19.fid']; % sl() fa(215.8760)
-%       reconDir = [u_dir '/ser20.fid']; % sl() fa(1.6719e+03) ) 
+%       reconDir = [u_dir '/ser20.fid']; % sl() fa(1.6719e+03) )
+    %% rad3d002 2019 testing 
+    u_dir='/delosspace/N190913_01';
+    reconDir=[u_dir '/ser01.fid'];
      %% rad3ddw014 adding diffusion stuff back, 
+%     u_dir=fullfile(getenv('BIGGUS_DISKUS'),'S68003_10 ');
      % np=128, pt_index=0, pt_index_skip=1 nv=3072
 %      reconDir = [u_dir '/ser24.fid']; % sl() fa(4.9464)  diffusion  panel
 %      disabled using minTE and minTR
@@ -72,9 +79,26 @@ if ~IAMSCOTT
 %      reconDir = [u_dir '/ser26.fid']; % sl() fa(4.1793) diffusion off dro=0,dpe=1,dsl=0
 %      reconDir = [u_dir '/ser27.fid']; % sl() fa(4.1824) diffusion off dro=1,dpe=0,dsl=0
 %      reconDir = [u_dir '/ser28.fid']; % sl() fa(4.1868) diffusion off dro=1,dpe=1,dsl=1
-%       reconDir = [u_dir '/ser29.fid']; % sl() fa(4.5535) diffusion off dro=0.001,dpe=0.001,dsl=0.001
-%       reconDir = [u_dir '/ser30.fid']; % sl() fa(4.2394) diffusion panel disabled, kept TR and TE from the diffusion scans
-   
+%      reconDir = [u_dir '/ser29.fid']; % sl() fa(4.5535) diffusion off dro=0.001,dpe=0.001,dsl=0.001
+%      reconDir = [u_dir '/ser30.fid']; % sl() fa(4.2394) diffusion panel disabled, kept TR and TE from the diffusion scans
+%      reconDir = [u_dir '/ser31.fid']; % sl(22.7314) fa(4.3649) dro,dpe,dsl == 1e-15(effectively 0)
+%      reconDir = [u_dir '/ser32.fid']; % sl() fa() dro,dpe,dsl == 5
+%      reconDir = [u_dir '/ser33.fid']; % sl() fa() dro,dpe,dsl == 5
+%      reconDir = [u_dir '/ser34.fid']; % sl() fa() dro,dpe,dsl == 5
+%      reconDir = [u_dir '/ser35.fid']; % sl() fa() dro,dpe,dsl == 5
+%      reconDir = [u_dir '/ser36.fid']; % sl() fa() dro,dpe,dsl == 5
+%      reconDir = [u_dir '/ser37.fid']; % sl() fa() dro,dpe,dsl == 5
+%     u_dir=fullfile(getenv('BIGGUS_DISKUS'),'S68003_11');
+%      reconDir = [u_dir '/ser02.fid']; % sl() fa() dro,dpe,dsl == 0
+%      reconDir = [u_dir '/ser03.fid']; % sl() fa() dro,dpe,dsl == 0
+%      reconDir = [u_dir '/ser04.fid']; % sl() fa() dro,dpe,dsl == 0
+%      reconDir = [u_dir '/ser05.fid']; % sl() fa() dro,dpe,dsl == 0
+%      reconDir = [u_dir '/ser06.fid']; % sl() fa() dro,dpe,dsl == 0
+%      reconDir = [u_dir '/ser07.fid']; % sl() fa() dro,dpe,dsl == 0
+%      reconDir = [u_dir '/ser08.fid']; % sl() fa() dro,dpe,dsl == 0
+       
+       
+       
 else
 end
 % should  try to calc this, its based on dwell time. 
@@ -87,13 +111,13 @@ trajShift=1;% + numbers add more pts to contibute to k0
 
 %% gross reco settings fast/slow
 reco_speed='slow';
-reco_speed='fast';
+%reco_speed='fast';
 
 if strcmp(reco_speed,'fast')
-    rs=0; 
+    good_recon=0; 
     % reconTime =   2.3634 ( og 1.0 )
 elseif strcmp(reco_speed,'slow')
-    rs=1; 
+    good_recon=1; 
     % reconTime = 405.7575 ( og 1.5 )
     % reconTime =  92.0684 ( og 1.0 )
 else
@@ -112,8 +136,9 @@ scale = 1;
 % at 1.5  with 128 nPts and 12800 rays used over 20GiB's memory
 % oversampling = 1.75; 
 % oversampling = 1.5;
-oversampling = 1;
-if ~rs
+oversampling = 2;
+oversampling = 1; % As a concession for a good recon with limited memory 
+if ~good_recon
     oversampling = 1;
 end
 % oversampling = 1.2;
@@ -123,14 +148,14 @@ end
 % sharpness = 0.3; % inital demo code
 % sharpness = 0.5; % a supposidly reasonable number
 sharpness = 0.7;
-if ~rs
+if ~good_recon
 sharpness = 0.35; % 0.15 recommended by scott when told we're slow
 sharpness = 0.5; % 0.15 recommended by scott when told we're slow
 end
 
 %extent = 1*sharpness; % 9 is a good value
 extent = 9*sharpness; % 9 is a good value
-if ~rs
+if ~good_recon
 extent = 6*sharpness; % recommended by scott when told we're slow
 end
 
@@ -426,7 +451,7 @@ for iSysMat = 1:nSysMat % This can be done in parallel, but takes LOTS of memory
             % Reconstruct image domain with IFFT
             shit.tmpVol = reshape(full(shit.windowRecon(:,iSameStart, iCoil)),overgrid_mat_size); % make unsparse;
             %% display kspace 
-            volfig_id=100+garbagePts+10*trajShift+10000*rs;
+            volfig_id=100+garbagePts+10*trajShift+10000*good_recon;
             if IAMSCOTT
                 imslice(abs(slidingWindowReconVol),sprintf('kspace %i',volfig_id));
             else
@@ -455,7 +480,7 @@ for iSysMat = 1:nSysMat % This can be done in parallel, but takes LOTS of memory
 end
 reconTime = toc(startTime)
 %% Show the reconstruction and/or save it.
-volfig_id=200+garbagePts+10*trajShift+10000*rs;
+volfig_id=200+garbagePts+10*trajShift+10000*good_recon;
 if IAMSCOTT
     imslice(abs(slidingWindowReconVol),sprintf('imgspace %i',volfig_id));
     profile viewer
@@ -465,5 +490,7 @@ else
     profout=sprintf('%s_%s%05.2f.profile',reconDir,reco_speed,oversampling);
     fprintf('saving %s\n',outfile);
     save_nii(make_nii(abs(slidingWindowReconVol)),outfile);
-    profsave(profile('info'),profout);
+    if testing
+        profsave(profile('info'),profout);
+    end
 end
